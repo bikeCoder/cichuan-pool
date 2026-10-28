@@ -60,7 +60,9 @@ $ pool next --json
 | `pool add <text>` | Create a candidate task (project identity from the git remote of your current repo) |
 | `pool next [--tag ...]` | Atomically claim one task; returns the task plus a one-line selection reason |
 | `pool done <id> --commit <sha>` | Register a delivery claim (task → `done_pending_merge`) |
-| `pool sync [--repo PATH]` | Verify claims: archive strong evidence, keep the rest unconfirmed with reasons |
+| `pool sync [--repo PATH]` | Verify claims: archive strong evidence, keep the rest unconfirmed with reasons (grouped by strong/weak/none) |
+| `pool doctor [--repo PATH]` | Read-only diagnosis: every pending claim falls into exactly one family — no sha / cross-repo (possible multi-landing) / strong / weak / none; weak items get two action hints (borrow an agent to verify, or confirm manually) |
+| `pool board [--host H] [--port P]` | Optional local board (read-only, stdlib only): binds 127.0.0.1:8765 by default; a non-loopback `--host` prints an exposure warning |
 | `pool export <file>` / `pool import <file>` | Versioned JSONL backup / restore |
 
 Selection order: effective score (highest first), then wait time, then task

@@ -64,7 +64,9 @@ def sync_pool(conn: sqlite3.Connection, *, probe_repo: str,
     """对全部 done_pending_merge 逐件核账（design-v1 §4.2 归档准入）。
 
     逐件降级：单件探测异常不影响其他件，只进「待确认」组并带原因。
-    返回 {archived: [...], unconfirmed: [...]}；有环境级失败时附带 errors。
+    返回 {archived: [...], unconfirmed: [...], families: {...}}；families 把
+    待确认按 strong/weak/none 三档分族（#10857），值为件号列表（升序）。
+    有环境级失败时附带 errors。
     """
     _ensure_pool(conn)
     if evidence_probe is None:
@@ -98,4 +100,9 @@ def sync_pool(conn: sqlite3.Connection, *, probe_repo: str,
         else:
             unconfirmed.append(entry)
     conn.commit()
-    return {"archived": archived, "unconfirmed": unconfirmed, "errors": errors}
+    families: dict[str, list[int]] = {"strong": [], "weak": [], "none": []}
+    for e in unconfirmed:
+        tier = e.get("tier", "none")
+        families.setdefault(tier, []).append(e["id"])
+    return {"archived": archived, "unconfirmed": unconfirmed,
+            "families": families, "errors": errors}

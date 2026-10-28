@@ -109,6 +109,51 @@ def cmd_sync(args, data_dir) -> tuple[dict, int]:
         conn.close()
 
 
+def cmd_board(args, data_dir) -> tuple[dict, int]:
+    """可选本地看板（D4/D9）：阻塞式常驻，自打印运行信息后 serve。
+
+    默认只绑 127.0.0.1；--host 显式暴露时向 stderr 打印警告。
+    看板只读（只走 store 读路径），不写数据根、不触碰项目仓。
+    """
+    from ..board import server as board_server
+    from ..store.paths import resolve_db_path
+
+    db_path = resolve_db_path(data_dir)
+    if not db_path.exists():
+        raise PoolError(Code.POOL_NOT_INITIALIZED,
+                        f"pool not initialized ({db_path} missing): run `pool init` first")
+    try:
+        srv, exposed = board_server.make_server(db_path, args.host, args.port)
+    except OSError as exc:
+        raise PoolError(Code.CONFIG_INVALID,
+                        f"failed to bind board server: {exc}") from None
+    host, port = srv.server_address[:2]
+    if exposed:
+        # D9：显式暴露必须留下显式警告（stderr，不进 --json envelope）
+        print(f"WARNING: board is bound to non-loopback address {host}; "
+              "the API is unauthenticated (read-only). Ctrl+C to stop.",
+              file=sys.stderr)
+        sys.stderr.flush()
+    print(f"Board serving http://{host}:{port} (read-only; Ctrl+C to stop)")
+    sys.stdout.flush()
+    try:
+        board_server.serve_forever(srv)
+    except KeyboardInterrupt:
+        pass
+    return {"host": str(host), "port": port, "stopped": True}, 0
+
+
+def cmd_doctor(args, data_dir) -> tuple[dict, int]:
+    """只读诊断报告（#10857）：待核账件按族分报，不归档不改状态。"""
+    from ..core.doctor import doctor_report
+
+    conn = _connect_or_fail(data_dir)
+    try:
+        return doctor_report(conn, probe_repo=args.repo), 0
+    finally:
+        conn.close()
+
+
 def cmd_export(args, data_dir) -> tuple[dict, int]:
     from ..core.transfer import export_pool
 
@@ -216,6 +261,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_sync.add_argument("--repo", default=".", help="交付仓本地路径（缺省当前目录）")
     p_sync.set_defaults(fn=cmd_sync)
 
+    p_board = sub.add_parser("board", parents=[common],
+                             help="可选本地看板（只读；默认仅绑 127.0.0.1）")
+    p_board.add_argument("--host", default=None,
+                         help="绑定地址（缺省 127.0.0.1；非回环地址将打印暴露警告）")
+    p_board.add_argument("--port", type=int, default=None,
+                         help="监听端口（缺省 8765；0 表示内核自动分配）")
+    p_board.set_defaults(fn=cmd_board)
+
+    p_doctor = sub.add_parser("doctor", parents=[common],
+                              help="只读诊断：待核账件按 strong/weak/none 分族出报告")
+    p_doctor.add_argument("--repo", default=".", help="交付仓本地路径（缺省当前目录）")
+    p_doctor.set_defaults(fn=cmd_doctor)
+
     p_export = sub.add_parser("export", parents=[common], help="导出版本化 JSONL（备份/换机）")
     p_export.add_argument("file")
     p_export.set_defaults(fn=cmd_export)
@@ -263,10 +321,42 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "sync":
             for e in data["archived"]:
                 print(f"archived #{e['id']}: {e['reason']}")
-            for e in data["unconfirmed"]:
+            # 待确认按三档分族（#10857）：strong-未归档 / weak / none
+            _TIER_TITLES = {"strong": "strong but not auto-archived",
+                            "weak": "weak evidence (needs confirm)",
+                            "none": "no evidence (needs confirm)"}
+            for tier in ("strong", "weak", "none"):
+                entries = [e for e in data["unconfirmed"] if e.get("tier") == tier]
+                if entries:
+                    print(f"{_TIER_TITLES[tier]}:")
+                    for e in entries:
+                        print(f"  #{e['id']}: {e['reason']}")
+            leftover = [e for e in data["unconfirmed"] if e.get("tier") not in ("strong", "weak", "none")]
+            for e in leftover:
                 print(f"unconfirmed #{e['id']}: {e['reason']}")
             if not data["archived"] and not data["unconfirmed"]:
                 print("no pending delivery declarations")
+        elif args.command == "doctor":
+            print(f"pool doctor — {data['total']} tasks "
+                  f"({', '.join(f'{k} {v}' for k, v in sorted(data['by_status'].items()))})")
+            print(f"pending verification: {data['pending']}")
+            _FAMILY_TITLES = {
+                "no_sha": "no delivery sha registered",
+                "cross_repo": "cross-repo delivery (possible multi-landing)",
+                "strong": "strong (sync will archive)",
+                "weak": "weak (needs confirm)",
+                "none": "none (needs confirm)",
+            }
+            for family, entries in data["families"].items():
+                if not entries:
+                    continue
+                print(f"{_FAMILY_TITLES[family]} ({len(entries)}):")
+                for e in entries:
+                    print(f"  #{e['id']} {e['text']}: {e['reason']}")
+                    for hint in e.get("hints", []):
+                        print(f"    - {hint}")
+            if data["pending"] == 0:
+                print("nothing pending verification")
         elif args.command == "config":
             action = args.config_action
             if action == "show":
