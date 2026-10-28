@@ -70,6 +70,26 @@ Selection order: effective score (highest first), then wait time, then task
 id — stable and explainable. Filters narrow the set; they never reorder it.
 By default one task is in progress at a time.
 
+## Advanced guides: the four pain paths
+
+Beyond the core loop, the pool grows along four paths — one per pain, one
+guide each, mapped to a preset where one applies:
+
+| Path | You feel this when | Read |
+|---|---|---|
+| **Concurrency** | two agents grabbed the same task | [docs/advanced/concurrency.md](docs/advanced/concurrency.md) (`fleet` preset) |
+| **Scale** | the pool passed 100 tasks and you can't tell what's next | [docs/advanced/scale.md](docs/advanced/scale.md) |
+| **Auditing** | did the agents actually deliver? | [docs/advanced/auditing.md](docs/advanced/auditing.md) |
+| **Governance** | rules and trails for a shared pool | [docs/advanced/governance.md](docs/advanced/governance.md) (`team` preset) |
+
+Each guide opens with a real incident from running a large internal pool,
+explains the mechanism, walks the commands (every transcript was produced by
+actually running them), and ends with criteria for when to switch the path
+on. Chinese mirrors live under [docs/zh/advanced/](docs/zh/advanced/).
+`pool --help` intentionally shows only the five core commands plus these four
+entries — advanced commands (`config`, `board`, `doctor`, `mcp`, `export`,
+`import`) stay executable and documented in the guides.
+
 ## Presets (solo / fleet / team)
 
 Don't configure individual switches — pick a preset and move on:

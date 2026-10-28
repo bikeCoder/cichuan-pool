@@ -230,22 +230,12 @@ def cmd_mcp(args, data_dir) -> tuple[dict, int]:
     return {"mode": mode, "stopped": True}, 0
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="pool", description="cichuan-pool — agent-first 任务池")
+def _register_advanced_commands(sub, common) -> None:
+    """进阶命令（四路径背后的命令面）。
 
-    # 全局参数同时挂顶层与各子命令（agent 习惯 `pool next --json` 后置写法）。
-    # 两处都 default=SUPPRESS：未出现时不写 namespace，避免子解析器覆盖顶层已解析值。
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
-                        help="输出稳定 JSON envelope")
-    common.add_argument("--data-dir", default=argparse.SUPPRESS,
-                        help="数据根目录（缺省 ~/.cichuan-pool）")
-    parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
-                        help=argparse.SUPPRESS)
-    parser.add_argument("--data-dir", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
-
-    sub = parser.add_subparsers(dest="command", required=True)
-
+    仅在显式点名时才注册（见 build_parser）——顶层 `pool --help` 因此只显
+    核心层 + epilog 的四路径文档入口；`pool <cmd> --help` 照常可用。
+    """
     p_config = sub.add_parser("config", parents=[common], help="预设档与开关（solo/fleet/team）")
     config_sub = p_config.add_subparsers(dest="config_action", required=True)
     p_show = config_sub.add_parser("show", parents=[common], help="展开当前档完整开关清单")
@@ -257,29 +247,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_unset = config_sub.add_parser("unset", parents=[common], help="撤销单项覆盖，回到档默认")
     p_unset.add_argument("key")
     p_config.set_defaults(fn=cmd_config)
-    p_init = sub.add_parser("init", parents=[common], help="建池并打印数据根")
-    p_init.set_defaults(fn=cmd_init)
-
-    p_add = sub.add_parser("add", parents=[common], help="新建 candidate，返回件号")
-    p_add.add_argument("text")
-    p_add.add_argument("--detail", default="")
-    p_add.add_argument("--tag", action="append", default=[])
-    p_add.add_argument("--untrusted", action="store_true", help="外部导入任务降权标记")
-    p_add.add_argument("--cwd", default=None, help=argparse.SUPPRESS)  # 测试注入项目目录
-    p_add.set_defaults(fn=cmd_add)
-
-    p_next = sub.add_parser("next", parents=[common], help="原子认领一件，返回任务与选择理由")
-    p_next.add_argument("--tag", action="append", default=[])
-    p_next.set_defaults(fn=cmd_next)
-
-    p_done = sub.add_parser("done", parents=[common], help="登记交付声明，进入待核账")
-    p_done.add_argument("id", type=int)
-    p_done.add_argument("--commit", required=True, help="交付 commit sha（7-40 位十六进制）")
-    p_done.set_defaults(fn=cmd_done)
-
-    p_sync = sub.add_parser("sync", parents=[common], help="核账：strong 自动归档，weak/none 待确认")
-    p_sync.add_argument("--repo", default=".", help="交付仓本地路径（缺省当前目录）")
-    p_sync.set_defaults(fn=cmd_sync)
 
     p_board = sub.add_parser("board", parents=[common],
                              help="可选本地看板（只读；默认仅绑 127.0.0.1）")
@@ -309,12 +276,92 @@ def build_parser() -> argparse.ArgumentParser:
     p_import.add_argument("file")
     p_import.set_defaults(fn=cmd_import)
 
+
+_ADVANCED_COMMANDS = ("config", "board", "doctor", "mcp", "export", "import")
+
+
+def _first_command(argv: list[str]) -> str | None:
+    """argv 里第一个子命令名（跳过全局旗标；--data-dir 带值要一并跳过）。"""
+    skip_next = False
+    for token in argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if token == "--data-dir":
+            skip_next = True
+            continue
+        if token.startswith("-"):
+            continue
+        return token
+    return None
+
+
+def build_parser(argv: list[str] | None = None) -> argparse.ArgumentParser:
+    # help 面只显核心层（五命令）+ 四条进阶路径入口（D2）：进阶命令仍可执行，
+    # 但从顶层 --help 清单隐藏（help=SUPPRESS），入口交给进阶文档。
+    parser = argparse.ArgumentParser(
+        prog="pool",
+        description="cichuan-pool — agent-first 任务池",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""core loop:  init -> add -> next -> done --commit <sha> -> sync
+
+advanced paths (read the guide first, commands revealed inside):
+  concurrency  several agents, one pool .......... docs/advanced/concurrency.md
+  scale        the pool passed 100 tasks ......... docs/advanced/scale.md
+  auditing     did the agents deliver? ........... docs/advanced/auditing.md
+  governance   rules for a shared pool ........... docs/advanced/governance.md
+
+Chinese mirrors: docs/zh/advanced/ · JSON mode: append --json to any command
+""")
+
+    # 全局参数同时挂顶层与各子命令（agent 习惯 `pool next --json` 后置写法）。
+    # 两处都 default=SUPPRESS：未出现时不写 namespace，避免子解析器覆盖顶层已解析值。
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                        help="输出稳定 JSON envelope")
+    common.add_argument("--data-dir", default=argparse.SUPPRESS,
+                        help="数据根目录（缺省 ~/.cichuan-pool）")
+    parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--data-dir", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    # 进阶命令仅在显式点名时注册：顶层 --help 只显核心层 + 四路径文档入口（D2）。
+    if _first_command(argv or []) in _ADVANCED_COMMANDS:
+        _register_advanced_commands(sub, common)
+
+    p_init = sub.add_parser("init", parents=[common], help="建池并打印数据根")
+    p_init.set_defaults(fn=cmd_init)
+
+    p_add = sub.add_parser("add", parents=[common], help="新建 candidate，返回件号")
+    p_add.add_argument("text")
+    p_add.add_argument("--detail", default="")
+    p_add.add_argument("--tag", action="append", default=[])
+    p_add.add_argument("--untrusted", action="store_true", help="外部导入任务降权标记")
+    p_add.add_argument("--cwd", default=None, help=argparse.SUPPRESS)  # 测试注入项目目录
+    p_add.set_defaults(fn=cmd_add)
+
+    p_next = sub.add_parser("next", parents=[common], help="原子认领一件，返回任务与选择理由")
+    p_next.add_argument("--tag", action="append", default=[])
+    p_next.set_defaults(fn=cmd_next)
+
+    p_done = sub.add_parser("done", parents=[common], help="登记交付声明，进入待核账")
+    p_done.add_argument("id", type=int)
+    p_done.add_argument("--commit", required=True, help="交付 commit sha（7-40 位十六进制）")
+    p_done.set_defaults(fn=cmd_done)
+
+    p_sync = sub.add_parser("sync", parents=[common], help="核账：strong 自动归档，weak/none 待确认")
+    p_sync.add_argument("--repo", default=".", help="交付仓本地路径（缺省当前目录）")
+    p_sync.set_defaults(fn=cmd_sync)
+
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    args_list = list(sys.argv[1:]) if argv is None else list(argv)
+    parser = build_parser(args_list)
+    args = parser.parse_args(args_list)
     json_flag = getattr(args, "json", False)
     data_dir = getattr(args, "data_dir", None)
     try:
