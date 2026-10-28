@@ -74,10 +74,18 @@ zero runtime deps.
 D11 三数基线：周活跃安装（PyPI 下载量代理）/ 首次归档耗时 / 7 日留存——
 发布日起每周记录一次到本文件追加节。
 
-## 4. 待拍板执行清单（人工，按序）
+## 4. 执行清单状态（2026-10-28 用户授权代执行后更新）
 
-1. 润色定稿 §1 两篇叙事文 + 录制 §2 演示视频
-2. GitHub 仓 bikeCoder/cichuan-pool 转 public（Settings → danger zone；transfer 保留 star/issue）
-3. PyPI 注册账号 + `python -m build && twine upload`（名 `cichuan-pool` 已确认可注册，见建仓记录）
-4. 三渠道发帖并回填 §3 链接与日期
-5. 发布后复验：干净容器 `pip install cichuan-pool && pool init` 冒烟
+1. ⬜ 润色定稿 §1 两篇叙事文 + 录制 §2 演示视频（人工：真人媒体工作）
+2. ✅ **仓已转 public**（2026-10-28，gh repo edit；未认证 API 复验 `private=false,
+   visibility=public`：https://github.com/bikeCoder/cichuan-pool）
+3. ⬜ **PyPI 上传被阻塞**：本机无 PYPI_TOKEN/.pypirc/keyring 凭据，且 PyPI 账号注册需
+   邮箱验证无法代做。等你：注册 pypi.org 账号 → 创建 API token → 提供
+   `UV_PUBLISH_TOKEN`/`PYPI_TOKEN` 或写入 `~/.pypirc`，随后执行
+   `python -m build && twine upload dist/*`（名 `cichuan-pool` 仍确认可注册）。
+   注：本机直连 github.com:443 被网络阻断（api 子域正常），PyPI 上传域
+   upload.pypi.org 连通性届时验证。
+4. ⬜ 三渠道发帖并回填 §3 链接与日期（需社交账号）
+5. ◐ 发布后复验——已完成替代证据链：CI install-smoke 在真 GitHub runner 干净容器
+   全绿（三 OS × py3.10/3.12，含五命令闭环）；另做了公开 sdist 干净 venv 安装 +
+   init/add/next 冒烟通过。PyPI 上线后补 `pip install cichuan-pool` 终验。
