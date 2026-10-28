@@ -210,6 +210,26 @@ def cmd_config(args, data_dir) -> tuple[dict, int]:
         conn.close()
 
 
+def cmd_mcp(args, data_dir) -> tuple[dict, int]:
+    """MCP server（阶段C-01）：CLI 的薄封装，stdio 传输，不涉网络。
+
+    stdout 是 JSON-RPC 协议通道——本命令不在 stdout 打印任何横幅/结果，
+    就绪信息走 stderr；serve 结束（EOF/Ctrl+C）后静默返回。
+    """
+    from ..mcp import server as mcp_server
+
+    state = mcp_server.make_state(read_only=args.read_only, data_dir=data_dir)
+    mode = "read-only" if state.read_only else "read-write"
+    print(f"cichuan-pool MCP server ready ({mode}; stdio transport, no network)",
+          file=sys.stderr)
+    sys.stderr.flush()
+    try:
+        mcp_server.serve(state, sys.stdin, sys.stdout)
+    except KeyboardInterrupt:
+        pass
+    return {"mode": mode, "stopped": True}, 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pool", description="cichuan-pool — agent-first 任务池")
 
@@ -273,6 +293,12 @@ def build_parser() -> argparse.ArgumentParser:
                               help="只读诊断：待核账件按 strong/weak/none 分族出报告")
     p_doctor.add_argument("--repo", default=".", help="交付仓本地路径（缺省当前目录）")
     p_doctor.set_defaults(fn=cmd_doctor)
+
+    p_mcp = sub.add_parser("mcp", parents=[common],
+                           help="MCP server（stdio；四工具薄封装；--read-only 只读闸）")
+    p_mcp.add_argument("--read-only", action="store_true", default=None,
+                       help="只读模式：tools/list 只暴露读工具，写工具调用被拒")
+    p_mcp.set_defaults(fn=cmd_mcp)
 
     p_export = sub.add_parser("export", parents=[common], help="导出版本化 JSONL（备份/换机）")
     p_export.add_argument("file")

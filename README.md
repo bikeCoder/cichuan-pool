@@ -63,6 +63,7 @@ $ pool next --json
 | `pool sync [--repo PATH]` | Verify claims: archive strong evidence, keep the rest unconfirmed with reasons (grouped by strong/weak/none) |
 | `pool doctor [--repo PATH]` | Read-only diagnosis: every pending claim falls into exactly one family — no sha / cross-repo (possible multi-landing) / strong / weak / none; weak items get two action hints (borrow an agent to verify, or confirm manually) |
 | `pool board [--host H] [--port P]` | Optional local board (read-only, stdlib only): binds 127.0.0.1:8765 by default; a non-loopback `--host` prints an exposure warning |
+| `pool mcp [--read-only]` | MCP server exposing the pool as native agent tools (stdio transport, no network; see [MCP server](#mcp-server) below) |
 | `pool export <file>` / `pool import <file>` | Versioned JSONL backup / restore |
 
 Selection order: effective score (highest first), then wait time, then task
@@ -94,6 +95,58 @@ tweak? Override a single switch (`pool config set audit_trail on`,
 `pool config unset audit_trail`) — but presets, not switches, are what the
 docs teach. Every advanced mechanism is **off by default**: a pool with no
 configuration behaves exactly like plain `solo` (fail-closed).
+
+## MCP server
+
+`pool mcp` starts a [Model Context Protocol](https://modelcontextprotocol.io)
+server so MCP-native agents (Claude Code, Cursor, …) drive the pool with
+native tools instead of shelling out to the CLI. It is a **thin wrapper**:
+every tool forwards to the same code path as the CLI command, returns the
+same JSON envelope, and uses the same `error.code` values — the CLI stays the
+single source of truth.
+
+| Tool | Access | Forwards to |
+|---|---|---|
+| `pool_next` | write | `pool next` (claiming mutates pool state) |
+| `pool_add` | write | `pool add` |
+| `pool_done` | write | `pool done` |
+| `pool_sync` | write | `pool sync` |
+| `pool_list` | read | read-only SELECT of all tasks (public fields) |
+
+**Permission separation.** Every tool declares its access class and carries
+the matching MCP `readOnlyHint` annotation, so hosts can auto-approve read
+tools while gating write ones. Start the server with `--read-only` (or
+`POOL_MCP_READ_ONLY=1`) to enforce it server-side: `tools/list` then only
+advertises read tools and any write-tool call is rejected with
+`MCP_WRITE_DISABLED`. Note that all four core-loop tools are write tools —
+claiming (`pool_next`) and archiving (`pool_sync`) change pool state, so a
+read-only server intentionally exposes just `pool_list`.
+
+**Transport & network.** The only transport in this release is **stdio**:
+the host spawns `pool mcp` as a child process and speaks newline-delimited
+JSON-RPC 2.0 over stdin/stdout. The server never opens a socket — there is
+no network surface at all (a test pins this). Remote transports and
+authentication are explicitly out of scope until the hosted phase.
+
+### Claude Code setup
+
+Add to `.mcp.json` in your project root (or configure via `claude mcp add`):
+
+```json
+{
+  "mcpServers": {
+    "cichuan-pool": {
+      "command": "pool",
+      "args": ["mcp"],
+      "env": { "POOL_ACTOR": "claude-code" }
+    }
+  }
+}
+```
+
+`POOL_ACTOR` sets the claiming identity (defaults to `solo`). To run it
+read-only (e.g. for a review-only agent), use `"args": ["mcp", "--read-only"]`.
+`pool mcp` reads the same `--data-dir` / `POOL_DATA_DIR` as the CLI.
 
 ## Machine interface
 
@@ -131,8 +184,9 @@ pool that you trust.
 - Evidence probing **never writes to your repositories**: the git adapter
   reads refs and objects only. It never fetches, never rewrites refs, never
   touches the working tree.
-- The optional board / MCP server binds to `127.0.0.1` by default; anything
-  else is an explicit, detectable override.
+- The optional board binds to `127.0.0.1` by default; anything else is an
+  explicit, detectable override. The MCP server uses stdio only and never
+  opens a network socket.
 
 ## Backup and rollback
 
