@@ -55,14 +55,14 @@ def _parse_header(line: str) -> dict:
     try:
         header = json.loads(line)
     except ValueError:
-        raise PoolError(Code.IMPORT_FORMAT_UNSUPPORTED, "首行不是合法 JSON") from None
+        raise PoolError(Code.IMPORT_FORMAT_UNSUPPORTED, "first line is not valid JSON") from None
     if not isinstance(header, dict) or header.get("format") != FORMAT_NAME:
         raise PoolError(Code.IMPORT_FORMAT_UNSUPPORTED,
-                        f"格式标识缺失或不符（需 {FORMAT_NAME}）")
+                        f"missing or wrong format marker (expected {FORMAT_NAME})")
     if header.get("version") != FORMAT_VERSION:
         raise PoolError(
             Code.IMPORT_FORMAT_UNSUPPORTED,
-            f"格式版本不支持：文件 v{header.get('version')}，本程序 v{FORMAT_VERSION}",
+            f"unsupported format version: file v{header.get('version')}, supported v{FORMAT_VERSION}",
             {"file_version": header.get("version"), "supported": FORMAT_VERSION},
         )
     return header
@@ -79,7 +79,7 @@ def import_pool(conn: sqlite3.Connection, in_path: str | Path) -> dict:
     with path.open("r", encoding="utf-8") as f:
         lines = f.read().splitlines()
     if not lines:
-        raise PoolError(Code.IMPORT_FORMAT_UNSUPPORTED, "空文件")
+        raise PoolError(Code.IMPORT_FORMAT_UNSUPPORTED, "empty file")
     _parse_header(lines[0])
 
     report = {
@@ -113,7 +113,7 @@ def import_pool(conn: sqlite3.Connection, in_path: str | Path) -> dict:
                 report["tasks"]["conflict"] += 1
                 report["tasks"]["conflicts"].append(
                     {"id": row.get("id"), "line": lineno,
-                     "reason": "池内已有同号件，未覆盖"})
+                     "reason": "task id already exists in pool; not overwritten"})
                 continue
             cols = {k: row.get(k) for k in _TASK_FIELDS}
             placeholders = ", ".join(f":{k}" for k in _TASK_FIELDS)

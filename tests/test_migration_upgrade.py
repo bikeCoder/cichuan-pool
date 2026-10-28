@@ -65,7 +65,7 @@ def test_failed_migration_restores_backup(data_dir):
         raise RuntimeError("模拟迁移中途崩溃")
 
     try:
-        with pytest.raises(MigrationError, match="已从备份恢复"):
+        with pytest.raises(MigrationError, match="restored from backup"):
             store_backup.upgrade(conn, db_path=db_path)
     finally:
         store_migrations._STEPS.pop(0, None)
@@ -86,5 +86,5 @@ def test_future_schema_version_is_rejected(data_dir, tmp_path):
     conn.execute(f"PRAGMA user_version = {store_db.SCHEMA_VERSION + 5}")
     conn.commit()
 
-    with pytest.raises(MigrationError, match="高于本程序支持"):
+    with pytest.raises(MigrationError, match="newer than supported"):
         store_backup.upgrade(conn, db_path=db_path)

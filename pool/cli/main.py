@@ -44,13 +44,13 @@ def _connect_or_fail(data_dir):
 
     db_path = resolve_db_path(data_dir)
     if not db_path.exists():
-        raise PoolError(Code.POOL_NOT_INITIALIZED, f"池未初始化（{db_path} 不存在）：先 pool init")
+        raise PoolError(Code.POOL_NOT_INITIALIZED, f"pool not initialized ({db_path} missing): run `pool init` first")
     try:
         return store_db.connect(db_path)
     except sqlite3.OperationalError as exc:
         if "locked" in str(exc).lower():
-            raise PoolError(Code.DB_LOCKED, f"数据库被锁：{exc}") from None
-        raise PoolError(Code.DB_LOCKED, f"数据库打开失败：{exc}") from None
+            raise PoolError(Code.DB_LOCKED, f"database is locked: {exc}") from None
+        raise PoolError(Code.DB_LOCKED, f"failed to open database: {exc}") from None
 
 
 def cmd_init(args, data_dir) -> tuple[dict, int]:
@@ -80,7 +80,7 @@ def cmd_next(args, data_dir) -> tuple[dict, int]:
         if task.untrusted:
             # D9：机器输出同样显式声明只读，agent 依赖结构化字段判断
             data["untrusted_readonly"] = True
-            data["note"] = "untrusted 任务只读不执行，需人工确认"
+            data["note"] = "untrusted task is read-only; human confirmation required before execution"
         return data, 0
     finally:
         conn.close()
@@ -200,30 +200,30 @@ def main(argv: list[str] | None = None) -> int:
         print(_envelope_ok(data))
     else:
         if args.command == "init":
-            print(f"池已就绪：{data['data_dir']}")
+            print(f"Pool ready: {data['data_dir']}")
         elif args.command == "add":
-            print(f"#{data['id']} 已入池（{data['status']}）：{data['text']}")
+            print(f"#{data['id']} added ({data['status']}): {data['text']}")
         elif args.command == "next":
             t = data["task"]
-            print(f"认领 #{t['id']}：{t['text']}")
-            print(f"理由：{data['reason']}")
+            print(f"Claimed #{t['id']}: {t['text']}")
+            print(f"Reason: {data['reason']}")
             if t.get("untrusted"):
                 # D9：untrusted 任务对 agent 只读不执行，需人工确认
-                print("⚠ 该件为 untrusted（外部导入）：只读不执行，需人工确认后方可实施")
+                print("WARNING: this task is untrusted (imported): read-only for agents; human confirmation required before execution")
         elif args.command == "done":
-            tag = "（重复声明，幂等）" if data.get("idempotent") else ""
-            print(f"#{data['id']} 已登记交付，待核账{tag}")
+            tag = " (duplicate declaration, idempotent)" if data.get("idempotent") else ""
+            print(f"#{data['id']} delivery registered, pending verification{tag}")
         elif args.command == "sync":
             for e in data["archived"]:
-                print(f"✓ 归档 #{e['id']}：{e['reason']}")
+                print(f"archived #{e['id']}: {e['reason']}")
             for e in data["unconfirmed"]:
-                print(f"· 待确认 #{e['id']}：{e['reason']}")
+                print(f"unconfirmed #{e['id']}: {e['reason']}")
             if not data["archived"] and not data["unconfirmed"]:
-                print("没有待核账的交付声明")
+                print("no pending delivery declarations")
         elif args.command == "export":
-            print(f"已导出 {data['tasks']} 件任务 / {data['events']} 条事件 → {data['path']}")
+            print(f"Exported {data['tasks']} tasks / {data['events']} events -> {data['path']}")
         elif args.command == "import":
             t = data["tasks"]
-            print(f"导入完成：任务 +{t['added']} / 冲突 {t['conflict']}，"
-                  f"事件 +{data['events']['added']}。外部任务已全部标记 untrusted（只读）。")
+            print(f"Import complete: tasks +{t['added']} / conflicts {t['conflict']}, "
+                  f"events +{data['events']['added']}. External tasks are marked untrusted (read-only).")
     return 0

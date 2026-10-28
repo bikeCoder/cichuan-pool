@@ -111,14 +111,14 @@ def test_untrusted_marked_readonly_in_next_output(env, capsys):
     out = json.loads(capsys.readouterr().out.strip())
     assert out["data"]["task"]["untrusted"] is True
     assert out["data"]["untrusted_readonly"] is True
-    assert "只读" in out["data"]["note"]
+    assert "read-only" in out["data"]["note"]
     # 人话输出同样显式
     conn = store_db.connect(resolve_db_path(root))
     conn.execute("UPDATE tasks SET status='candidate', claimed_by=NULL WHERE id=1")
     conn.commit(); conn.close()
     assert cli_main(["next"]) == 0
     out_line = capsys.readouterr().out
-    assert "untrusted" in out_line and "只读" in out_line
+    assert "untrusted" in out_line and "read-only" in out_line
 
 
 def test_board_binds_localhost_by_default():
@@ -158,8 +158,8 @@ def test_export_import_via_cli(env, tmp_path, capsys):
     assert cli_main(["add", "经CLI", "--cwd", str(proj)]) == 0
     capsys.readouterr()
     assert cli_main(["export", str(dump)]) == 0
-    assert "1 件任务" in capsys.readouterr().out
+    assert "1 tasks" in capsys.readouterr().out
     # 重导回同一池 → 冲突报告（不覆盖）
     rc = cli_main(["import", str(dump)])
     assert rc == 0
-    assert "冲突 1" in capsys.readouterr().out
+    assert "conflicts 1" in capsys.readouterr().out

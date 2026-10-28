@@ -35,7 +35,7 @@ def resolve_project(cwd: str | Path | None = None) -> str:
             capture_output=True, text=True, timeout=10,
         ).stdout.strip()
     except (OSError, subprocess.SubprocessError) as exc:
-        raise PoolError(Code.PROJECT_UNRESOLVED, f"无法探测项目身份：git 不可用（{exc}）") from None
+        raise PoolError(Code.PROJECT_UNRESOLVED, f"cannot resolve project identity: git unavailable ({exc})") from None
     if url:
         ident = normalize_remote(url)
         if ident:
@@ -49,5 +49,5 @@ def resolve_project(cwd: str | Path | None = None) -> str:
         return Path(top.stdout.strip()).resolve().as_posix().lower()
     raise PoolError(
         Code.PROJECT_UNRESOLVED,
-        f"{root} 不是 git 仓（无 remote 也无仓根），无法识别项目身份",
+        f"{root} is not a git repo (no remote, no toplevel); cannot resolve project identity",
     )

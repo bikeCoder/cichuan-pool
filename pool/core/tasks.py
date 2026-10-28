@@ -23,7 +23,7 @@ def now_iso() -> str:
 def _ensure_pool(conn: sqlite3.Connection) -> None:
     v = store_db.schema_version(conn)
     if v == 0 or not store_db.task_columns(conn):
-        raise PoolError(Code.POOL_NOT_INITIALIZED, "池未初始化：请先运行 pool init")
+        raise PoolError(Code.POOL_NOT_INITIALIZED, "pool is not initialized: run `pool init` first")
 
 
 def init_pool_cmd(data_dir=None) -> dict:
@@ -37,7 +37,7 @@ def init_pool_cmd(data_dir=None) -> dict:
             if store_db.schema_version(probe) == store_db.SCHEMA_VERSION:
                 raise PoolError(
                     Code.POOL_ALREADY_INITIALIZED,
-                    f"池已初始化：{db_path_guess}",
+                    f"pool already initialized: {db_path_guess}",
                     details={"data_dir": str(db_path_guess.parent)},
                 )
         except store_db.sqlite3.DatabaseError:
@@ -53,7 +53,7 @@ def add_task(conn: sqlite3.Connection, text: str, *, project_id: str,
              untrusted: bool = False) -> Task:
     _ensure_pool(conn)
     if not text or not text.strip():
-        raise PoolError(Code.USAGE, "add 需要非空 text")
+        raise PoolError(Code.USAGE, "add requires non-empty text")
     created = now_iso()
     cur = conn.execute(
         f"INSERT INTO tasks ({', '.join(PUBLIC_COLUMNS)}) "
@@ -124,11 +124,11 @@ def select_reason(candidates: list[Task], chosen: Task) -> str:
     days = _wait_days(chosen)
     scored = [t for t in candidates if _effective_score(t) is not None]
     if scored and _effective_score(chosen) is not None:
-        return f"评分最高（{_effective_score(chosen):g}）且已等待 {days:.1f} 天"
+        return f"highest score ({_effective_score(chosen):g}), waited {days:.1f} days"
     ties = [t for t in candidates if _effective_score(t) is None]
     if len(ties) > 1:
-        return f"无评分件中等待最久（{days:.1f} 天），同龄取件号最小"
-    return f"已等待 {days:.1f} 天"
+        return f"oldest unscored (waited {days:.1f} days); ties broken by lowest id"
+    return f"waited {days:.1f} days"
 
 
 def next_task(conn: sqlite3.Connection, *, actor: str, project_id: str | None = None,
@@ -150,7 +150,7 @@ def next_task(conn: sqlite3.Connection, *, actor: str, project_id: str | None = 
             t = _row_to_task(wip)
             raise PoolError(
                 Code.TASK_ALREADY_CLAIMED,
-                f"已有在办件 #{t.id}（先 pool done 或等核账），不重复认领",
+                f"task #{t.id} is already in progress (run `pool done` first); not claiming twice",
                 {"claimed_task_id": t.id},
             )
 
@@ -166,8 +166,8 @@ def next_task(conn: sqlite3.Connection, *, actor: str, project_id: str | None = 
             conn.rollback()
             total = conn.execute("SELECT COUNT(*) c FROM tasks").fetchone()["c"]
             if total == 0:
-                raise PoolError(Code.POOL_EMPTY, "池为空：先 pool add")
-            raise PoolError(Code.TASK_NOT_CLAIMABLE, "没有可认领的 candidate（过滤或状态导致）")
+                raise PoolError(Code.POOL_EMPTY, "pool is empty: run `pool add` first")
+            raise PoolError(Code.TASK_NOT_CLAIMABLE, "no claimable candidate (filter or task status)")
 
         chosen = min(tasks, key=lambda t: (
             -(_effective_score(t) if _effective_score(t) is not None else float("-inf")),
@@ -182,7 +182,7 @@ def next_task(conn: sqlite3.Connection, *, actor: str, project_id: str | None = 
         )
         if cur.rowcount != 1:  # 并发竞态防御：状态已被改走
             conn.rollback()
-            raise PoolError(Code.TASK_NOT_CLAIMABLE, f"件 #{chosen.id} 刚被其他认领者取走")
+            raise PoolError(Code.TASK_NOT_CLAIMABLE, f"task #{chosen.id} was just claimed by someone else")
         conn.commit()
         chosen.status = TaskStatus.CLAIMED
         chosen.claimed_at = ts

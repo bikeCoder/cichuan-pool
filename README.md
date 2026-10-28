@@ -1,31 +1,134 @@
 # cichuan-pool
 
-agent-first 任务池（本地优先，CLI 核心 + 可选看板）。**V1 开发中，未发布。**
+**An agent-first task pool.** Local-first CLI for managing a backlog of tasks
+that AI agents pick up, implement, and deliver — with evidence-based
+verification instead of honor system.
 
-核心闭环（design-v1 §1）：
+- **Local-first**: your tasks live in a single SQLite database on your machine
+  (`~/.cichuan-pool/` by default). No server, no account, no telemetry.
+- **Agent-first**: stable JSON output (`--json`), documented error codes, and
+  one-line human-readable reasons for every decision.
+- **Evidence-based**: "done" is a claim; `sync` verifies it against the git
+  history. An unmerged commit never gets archived.
 
-```text
-init → add → next →（agent 实现并 git commit）→ done <id> --commit <sha> → sync
-```
+Status: **v0 pre-release, under active development** (private until the V1
+release line).
 
-- 数据根默认 `~/.cichuan-pool/`（`--data-dir` / `POOL_DATA_DIR` 覆盖）
-- pip 包名 `cichuan-pool`，命令名 `pool`
-- 技术契约：内部仓 `cichuan-backlog/docs/product/design-v1.md`（公开后随仓迁移）
-- License：Apache-2.0
-
-## 开发
-
-```bash
-pip install -e .[dev]
-pytest
-```
-
-## 包边界
+## The core loop
 
 ```text
-pool/core     池件生命周期、迁移、导入导出（不 import 任何内部 hub 模块）
-pool/store    SQLite、事务、备份
-pool/evidence 证据契约与适配器（git 兜底；novelplatform 为可选 extras）
-pool/cli      命令解析与人话/JSON 渲染
-pool/board    可选本地看板适配层
+init → add → next → (agent implements & git commits) → done <id> --commit <sha> → sync
 ```
+
+`done` only *registers* a delivery claim. `sync` *verifies* it: a commit that
+is an ancestor of the default branch is strong evidence and gets archived
+automatically; a commit on a feature branch stays unconfirmed; a missing
+object or mismatched repo is never archived.
+
+```console
+$ pool init
+Pool ready: /home/you/.cichuan-pool
+
+$ pool add "Fix the login timeout"
+#1 added (candidate): Fix the login timeout
+
+$ pool next
+Claimed #1: Fix the login timeout
+Reason: waited 0.0 days
+
+$ pool done 1 --commit <sha>
+#1 delivery registered, pending verification
+
+$ pool sync --repo ~/src/myproject
+archived #1: commit 1cfdf9fbba41 is on default branch main
+```
+
+When there is nothing claimable, `next` fails with a documented code instead
+of pretending:
+
+```console
+$ pool next --json
+{"ok": false, "error": {"code": "TASK_NOT_CLAIMABLE",
+ "message": "no claimable candidate (filter or task status)", "details": {}}}
+```
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `pool init` | Create the pool database, print the data root |
+| `pool add <text>` | Create a candidate task (project identity from the git remote of your current repo) |
+| `pool next [--tag ...]` | Atomically claim one task; returns the task plus a one-line selection reason |
+| `pool done <id> --commit <sha>` | Register a delivery claim (task → `done_pending_merge`) |
+| `pool sync [--repo PATH]` | Verify claims: archive strong evidence, keep the rest unconfirmed with reasons |
+| `pool export <file>` / `pool import <file>` | Versioned JSONL backup / restore |
+
+Selection order: effective score (highest first), then wait time, then task
+id — stable and explainable. Filters narrow the set; they never reorder it.
+By default one task is in progress at a time.
+
+## Machine interface
+
+Add `--json` (before or after the subcommand) for a stable envelope:
+
+```json
+{"ok": true, "data": {"task": {"id": 1, "status": "claimed", "...": "..." }, "reason": "waited 0.0 days"}}
+```
+
+```json
+{"ok": false, "error": {"code": "TASK_ALREADY_CLAIMED", "message": "...", "details": {"claimed_task_id": 1}}}
+```
+
+Agents must depend on `error.code`, never on `message`. Exit codes:
+`0` success · `2` usage error · `3` expected business rejection ·
+`4` environment/storage error.
+
+Error codes: `POOL_NOT_INITIALIZED` `POOL_ALREADY_INITIALIZED` `POOL_EMPTY`
+`TASK_NOT_FOUND` `TASK_NOT_CLAIMABLE` `TASK_ALREADY_CLAIMED`
+`TASK_NOT_CLAIMED_BY_ACTOR` `DELIVERY_SHA_INVALID` `EVIDENCE_UNAVAILABLE`
+`DELIVERY_UNCONFIRMED` `PROJECT_MISMATCH` `PROJECT_UNRESOLVED`
+`CONFIG_INVALID` `DB_LOCKED` `IMPORT_FORMAT_UNSUPPORTED` `IMPORT_CONFLICT`
+`USAGE`.
+
+## Trust model (read this before importing tasks)
+
+**Task text is an instruction an agent may execute.** Only put tasks in the
+pool that you trust.
+
+- Tasks imported via `pool import` are always marked `untrusted` — regardless
+  of what the file says. An `untrusted` task is **read-only for agents**;
+  `pool next` flags it explicitly (`untrusted_readonly: true` in JSON, a
+  warning line in human output). A human must review and approve it before
+  any agent acts on it.
+- Evidence probing **never writes to your repositories**: the git adapter
+  reads refs and objects only. It never fetches, never rewrites refs, never
+  touches the working tree.
+- The optional board / MCP server binds to `127.0.0.1` by default; anything
+  else is an explicit, detectable override.
+
+## Backup and rollback
+
+- `pool export dump.jsonl` writes a self-describing, versioned JSONL file
+  (one JSON object per line: `project` / `task` / `event` rows).
+- `pool import dump.jsonl` refuses unknown format versions
+  (`IMPORT_FORMAT_UNSUPPORTED`), never overwrites conflicting task ids
+  (`IMPORT_CONFLICT` with a per-item report), and prints added/skipped/
+  conflict counts you can reconcile against the file.
+- Every schema migration takes an automatic file-level backup of the database
+  first; a failed migration restores the backup and reports where it is.
+  A database with a *newer* schema version refuses to open rather than
+  guessing.
+
+## Contributing
+
+- `pip install -e .[dev]` then `pytest` (no third-party runtime dependencies;
+  tests use temporary repositories only — no network, no hub, no real user
+  repos).
+- Apache-2.0. Issues and PRs welcome once the repo goes public.
+
+## Design docs
+
+The V1 technical contract (public schema, evidence tiers, state machine,
+invariants) lives in the internal design repo during the private period and
+ships with the public release. Chinese docs: `docs/` (this README is the
+English source of truth).

@@ -1,6 +1,6 @@
-"""V1 错误码与异常（design-v1 §5.3）。
+"""V1 error codes and exceptions (design-v1 §5.3).
 
-agent 只依赖 code，不解析 message。退出码：
+Agents depend on `code` only, never on `message`. Exit codes:
 0 成功；2 调用/参数错误；3 可预期业务拒绝；4 环境/存储错误。
 """
 from __future__ import annotations

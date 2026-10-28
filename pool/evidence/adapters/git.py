@@ -56,20 +56,20 @@ def probe(repo: str | Path, sha: str | None, *, project_id: str) -> Evidence:
     details["project_mismatch"] = mismatch
 
     if not sha:
-        return Evidence(Tier.NONE, "无交付 sha（未运行 pool done --commit）", details=details)
+        return Evidence(Tier.NONE, "no delivery sha (run `pool done --commit <sha>`)", details=details)
     if not repo_path.is_dir() or identity is None:
-        return Evidence(Tier.NONE, f"交付仓不可读或不是 git 仓：{repo_path}", details=details)
+        return Evidence(Tier.NONE, f"delivery repo unreadable or not a git repo: {repo_path}", details=details)
     if mismatch:
         return Evidence(
             Tier.NONE,
-            f"项目错配：任务属于 {project_id}，探测仓身份是 {identity}；不自动归档",
+            f"project mismatch: task belongs to {project_id}, probe repo is {identity}; will not auto-archive",
             project_mismatch=True,
             details=details,
         )
 
     rc, _ = _git(repo_path, "cat-file", "-e", f"{sha}^{{commit}}")
     if rc != 0:
-        return Evidence(Tier.NONE, f"对象不存在或不可达：{sha[:12]}", details=details)
+        return Evidence(Tier.NONE, f"object missing or unreachable: {sha[:12]}", details=details)
 
     branch = default_branch(repo_path)
     details["default_branch"] = branch
@@ -78,7 +78,7 @@ def probe(repo: str | Path, sha: str | None, *, project_id: str) -> Evidence:
         if rc == 0:
             details["refs"] = [branch]
             return Evidence(
-                Tier.STRONG, f"commit {sha[:12]} 已在默认分支 {branch}",
+                Tier.STRONG, f"commit {sha[:12]} is on default branch {branch}",
                 delivered=True, details=details,
             )
 
@@ -87,8 +87,8 @@ def probe(repo: str | Path, sha: str | None, *, project_id: str) -> Evidence:
     details["refs"] = refs
     if refs:
         return Evidence(
-            Tier.WEAK, f"commit {sha[:12]} 仅在非默认分支 {','.join(refs)}，未合并",
+            Tier.WEAK, f"commit {sha[:12]} only on non-default branch(es) {','.join(refs)}; not merged",
             details=details,
         )
     # 无分支包含（游离/悬挂提交）：属「漏报 strong 为 weak 允许」档——记 none 并说明
-    return Evidence(Tier.NONE, f"commit {sha[:12]} 不在任何分支上（游离提交）", details=details)
+    return Evidence(Tier.NONE, f"commit {sha[:12]} is on no branch (dangling commit)", details=details)

@@ -1,0 +1,89 @@
+name: install-smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  smoke:
+    name: Clean-container install + core loop (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # 干净容器语义：只装本包 + pytest，跑五命令闭环，不依赖任何缓存
+      - name: Install package (clean)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
+          python -m pip install pytest
+
+      - name: Unit tests from checkout (no network, no user repos)
+        run: python -m pytest -q
+
+      - name: Core loop smoke (init/add/next/done/sync)
+        shell: bash
+        run: |
+          set -e
+          # 临时项目仓（带 origin，项目身份可识别）
+          mkdir -p "$RUNNER_TEMP/proj" "$RUNNER_TEMP/drop"
+          git -C "$RUNNER_TEMP/proj" init -q -b main
+          git -C "$RUNNER_TEMP/proj" remote add origin https://github.com/you/myproject.git
+          cd "$RUNNER_TEMP/drop"
+          git init -q -b main
+          git remote add origin https://github.com/you/myproject.git
+          echo x > f && git add . 
+          git -c user.email=t@t -c user.name=t commit -qm "smoke work #1"
+          SHA=$(git rev-parse HEAD)
+          cd "$RUNNER_TEMP/proj"
+          export POOL_DATA_DIR="$RUNNER_TEMP/poolroot"
+
+          pool init
+          ID=$(pool add "Smoke task" --json | python -c "import json,sys;print(json.load(sys.stdin)['data']['id'])")
+          CLAIMED=$(pool next --json | python -c "import json,sys;print(json.load(sys.stdin)['data']['task']['id'])")
+          test "$ID" = "$CLAIMED"
+          # 重复 next 必须拒绝且 code 稳定
+          pool next --json | python -c "import json,sys;d=json.load(sys.stdin);assert not d['ok'] and d['error']['code']=='TASK_ALREADY_CLAIMED'" || \
+            (pool next --json; exit 1)
+          pool done "$ID" --commit "$SHA"
+          OUT=$(pool sync --repo "$RUNNER_TEMP/drop" --json)
+          echo "$OUT" | python -c "import json,sys;d=json.load(sys.stdin)['data'];assert len(d['archived'])==1 and d['archived'][0]['tier']=='strong',d"
+          # 幂等：二次 sync 不重复归档
+          OUT2=$(pool sync --repo "$RUNNER_TEMP/drop" --json)
+          echo "$OUT2" | python -c "import json,sys;d=json.load(sys.stdin)['data'];assert d['archived']==[] and d['unconfirmed']==[],d"
+          # 备份往返
+          pool export "$RUNNER_TEMP/dump.jsonl"
+          python -c "import json;h=open(r'$RUNNER_TEMP/dump.jsonl',encoding='utf-8').readline();assert json.loads(h)['format']=='cichuan-pool'"
+
+      - name: Unmerged commit must NOT archive (adversarial smoke)
+        shell: bash
+        run: |
+          set -e
+          cd "$RUNNER_TEMP/drop"
+          git checkout -q --detach
+          echo y > g && git add . 
+          git -c user.email=t@t -c user.name=t commit -qm "dangling work #2"
+          DANGLING=$(git rev-parse HEAD)
+          git checkout -q main
+          cd "$RUNNER_TEMP/proj"
+          ID2=$(pool add "Dangling task" --json | python -c "import json,sys;print(json.load(sys.stdin)['data']['id'])")
+          # 上一步已归档一件，无在办件 → 直接 next
+          CLAIMED2=$(pool next --json | python -c "import json,sys;print(json.load(sys.stdin)['data']['task']['id'])")
+          test "$ID2" = "$CLAIMED2"
+          pool done "$ID2" --commit "$DANGLING"
+          pool sync --repo "$RUNNER_TEMP/drop" --json | python -c "
+          import json,sys
+          d=json.load(sys.stdin)['data']
+          assert d['archived']==[], 'unmerged commit must never archive: %r' % d
+          assert len(d['unconfirmed'])==1, d
+          "

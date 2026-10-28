@@ -51,7 +51,7 @@ def test_next_ordering_score_then_age_then_id(env):
     conn.commit(); conn.close()
     rc, nxt = _run_json("--json", "next")
     assert nxt["data"]["task"]["id"] == ids[2]  # 评分优先
-    assert "评分最高" in nxt["data"]["reason"]
+    assert "highest score" in nxt["data"]["reason"]
 
 
 def test_same_score_ties_break_by_age_then_id(env):
@@ -131,12 +131,12 @@ def test_tag_filter_narrows_not_reorders(env):
 def test_human_output_and_exit_codes(env, capsys):
     _, proj = env
     assert cli_main(["init"]) == 0
-    assert "池已就绪" in capsys.readouterr().out
+    assert "Pool ready" in capsys.readouterr().out
     assert cli_main(["add", "事情", "--cwd", str(proj)]) == 0
-    assert "#1 已入池" in capsys.readouterr().out
+    assert "#1 added" in capsys.readouterr().out
     assert cli_main(["next"]) == 0
     out = capsys.readouterr().out
-    assert "认领 #1" in out and "理由：" in out
+    assert "Claimed #1" in out and "Reason:" in out
     # 未初始化的另一个根 → 退出码 4
     import os
     old = os.environ.get(ENV_DATA_DIR)

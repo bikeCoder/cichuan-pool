@@ -48,8 +48,8 @@ def upgrade(conn: sqlite3.Connection, *, db_path: str | Path | None = None) -> i
     current = schema_version(conn)
     if current > SCHEMA_VERSION:
         raise MigrationError(
-            f"池库 schema 版本 {current} 高于本程序支持的 {SCHEMA_VERSION}，"
-            "请升级 cichuan-pool 后再打开。"
+            f"pool schema version {current} is newer than supported {SCHEMA_VERSION}; "
+            "Upgrade cichuan-pool first."
         )
     # 空库判定不能用文件大小（连接建立时 WAL pragma 已写入头部）：
     # v0 且无任何用户表 = 全新库，直接建 schema，不算迁移、不产备份。
@@ -70,7 +70,7 @@ def upgrade(conn: sqlite3.Connection, *, db_path: str | Path | None = None) -> i
             v = schema_version(conn)
             step = m.get_step(v)
             if step is None:
-                raise MigrationError(f"缺少 v{v} 的迁移步骤")
+                raise MigrationError(f"missing migration step for v{v}")
             step(conn)
             newv = v + 1
             conn.execute(f"PRAGMA user_version = {newv}")
@@ -79,6 +79,6 @@ def upgrade(conn: sqlite3.Connection, *, db_path: str | Path | None = None) -> i
         conn.close()
         restore_backup(backup, path)
         raise MigrationError(
-            f"迁移失败，已从备份恢复：{backup}"
+            f"migration failed; restored from backup: {backup}"
         ) from None
     return schema_version(conn)

@@ -24,10 +24,10 @@ def done_task(conn: sqlite3.Connection, task_id: int, sha: str, *, actor: str,
     _ensure_pool(conn)
     if not isinstance(sha, str) or not _SHA_RE.match(sha.lower()):
         raise PoolError(Code.DELIVERY_SHA_INVALID,
-                        f"sha 格式非法：{sha!r}（需 7-40 位十六进制）", {"sha": sha})
+                        f"invalid sha: {sha!r} (expect 7-40 hex chars)", {"sha": sha})
     row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
     if row is None:
-        raise PoolError(Code.TASK_NOT_FOUND, f"件 #{task_id} 不存在", {"id": task_id})
+        raise PoolError(Code.TASK_NOT_FOUND, f"task #{task_id} not found", {"id": task_id})
     task = _row_to_task(row)
     sha_l = sha.lower()
     if task.status is TaskStatus.DONE_PENDING_MERGE:
@@ -42,11 +42,11 @@ def done_task(conn: sqlite3.Connection, task_id: int, sha: str, *, actor: str,
         return {"id": task.id, "status": task.status.value, "idempotent": False}
     if task.status is not TaskStatus.CLAIMED:
         raise PoolError(Code.TASK_NOT_CLAIMABLE,
-                        f"件 #{task_id} 状态为 {task.status.value}，仅 claimed 可 done",
+                        f"task #{task_id} is {task.status.value}; only claimed tasks can be done",
                         {"id": task.id, "status": task.status.value})
     if task.claimed_by != actor:
         raise PoolError(Code.TASK_NOT_CLAIMED_BY_ACTOR,
-                        f"件 #{task_id} 由 {task.claimed_by} 认领，非 {actor} 不得 done",
+                        f"task #{task_id} was claimed by {task.claimed_by}; actor {actor} may not done it",
                         {"id": task.id, "claimed_by": task.claimed_by})
     conn.execute(
         "UPDATE tasks SET status = ?, delivery_sha = ?, delivery_repo = ?, done_at = ? WHERE id = ?",
@@ -81,7 +81,7 @@ def sync_pool(conn: sqlite3.Connection, *, probe_repo: str,
                                 project_id=task.project_id)
         except Exception as exc:  # 逐件降级，不整批失败
             unconfirmed.append({"id": task.id, "tier": "none",
-                                "reason": f"探测异常：{exc}"})
+                                "reason": f"probe error: {exc}"})
             continue
         from ..evidence.base import can_auto_archive
         entry = {"id": task.id, "sha": task.delivery_sha, **ev.to_dict()}
