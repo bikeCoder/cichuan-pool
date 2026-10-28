@@ -71,6 +71,8 @@ jobs:
         shell: bash
         run: |
           set -e
+          # step 间环境不共享：数据根须重新导出
+          export POOL_DATA_DIR="$RUNNER_TEMP/poolroot"
           cd "$RUNNER_TEMP/drop"
           git checkout -q --detach
           echo y > g && git add . 
