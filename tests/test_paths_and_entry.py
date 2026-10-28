@@ -16,6 +16,10 @@ def test_explicit_data_dir_beats_env(monkeypatch, tmp_path):
     assert resolve_db_path(tmp_path / "explicit").parent == tmp_path / "explicit"
 
 
-def test_cli_placeholder_entry():
-    # 阶段 A-03 接线前：入口存在、明确报未实现，不静默成功
-    assert main([]) == 2
+def test_cli_requires_subcommand():
+    # 阶段 A-03 已接线：无子命令 = 参数错误（argparse 退出码 2）
+    import pytest
+    from pool.cli import main
+    with pytest.raises(SystemExit) as ei:
+        main([])
+    assert ei.value.code == 2
