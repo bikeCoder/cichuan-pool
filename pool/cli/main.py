@@ -129,6 +129,42 @@ def cmd_import(args, data_dir) -> tuple[dict, int]:
         conn.close()
 
 
+def cmd_config(args, data_dir) -> tuple[dict, int]:
+    from ..core import config as cfg
+
+    conn = _connect_or_fail(data_dir)
+    try:
+        action = args.config_action
+        if action == "show":
+            return cfg.effective_config(conn), 0
+        if action == "preset":
+            cfg.set_preset(conn, args.preset)
+            return {"preset": args.preset}, 0
+        if action == "set":
+            value: object = args.value
+            if isinstance(value, str):
+                if value.lower() in ("on", "true"):
+                    value = True
+                elif value.lower() in ("off", "false"):
+                    value = False
+                else:
+                    try:
+                        value = int(value)
+                    except ValueError:
+                        raise PoolError(Code.CONFIG_INVALID,
+                                        f"cannot parse value '{args.value}' (use on/off or an integer)") from None
+            cfg.set_override(conn, args.key, value)
+            return cfg.effective_config(conn), 0
+        if action == "unset":
+            removed = cfg.unset_override(conn, args.key)
+            data = cfg.effective_config(conn)
+            data["removed"] = removed
+            return data, 0
+        raise PoolError(Code.USAGE, "config requires show|preset|set|unset")
+    finally:
+        conn.close()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pool", description="cichuan-pool — agent-first 任务池")
 
@@ -145,6 +181,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(dest="command", required=True)
 
+    p_config = sub.add_parser("config", parents=[common], help="预设档与开关（solo/fleet/team）")
+    config_sub = p_config.add_subparsers(dest="config_action", required=True)
+    p_show = config_sub.add_parser("show", parents=[common], help="展开当前档完整开关清单")
+    p_preset = config_sub.add_parser("preset", parents=[common], help="切换预设档（清空全部单项覆盖）")
+    p_preset.add_argument("preset", help="solo | fleet | team")
+    p_set = config_sub.add_parser("set", parents=[common], help="单项覆盖一个开关（on/off 或整数）")
+    p_set.add_argument("key")
+    p_set.add_argument("value")
+    p_unset = config_sub.add_parser("unset", parents=[common], help="撤销单项覆盖，回到档默认")
+    p_unset.add_argument("key")
+    p_config.set_defaults(fn=cmd_config)
     p_init = sub.add_parser("init", parents=[common], help="建池并打印数据根")
     p_init.set_defaults(fn=cmd_init)
 
@@ -220,6 +267,26 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"unconfirmed #{e['id']}: {e['reason']}")
             if not data["archived"] and not data["unconfirmed"]:
                 print("no pending delivery declarations")
+        elif args.command == "config":
+            action = args.config_action
+            if action == "show":
+                print(f"preset: {data['preset']}")
+                for key, val in data.items():
+                    if key in ("preset", "overrides"):
+                        continue
+                    print(f"  {key}: {'on' if val else 'off'}"
+                          if isinstance(val, bool) else f"  {key}: {val}")
+                if data.get("overrides"):
+                    print(f"  (overrides: {', '.join(data['overrides'])})")
+            elif action == "preset":
+                print(f"Preset switched: {data['preset']} (overrides cleared)")
+            elif action == "set":
+                print(f"Override set: {args.key} (preset: {data['preset']})")
+            elif action == "unset":
+                if data.get("removed"):
+                    print(f"Override removed: {args.key} (preset: {data['preset']})")
+                else:
+                    print(f"No override for {args.key} (preset: {data['preset']})")
         elif args.command == "export":
             print(f"Exported {data['tasks']} tasks / {data['events']} events -> {data['path']}")
         elif args.command == "import":

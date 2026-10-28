@@ -67,6 +67,32 @@ Selection order: effective score (highest first), then wait time, then task
 id — stable and explainable. Filters narrow the set; they never reorder it.
 By default one task is in progress at a time.
 
+## Presets (solo / fleet / team)
+
+Don't configure individual switches — pick a preset and move on:
+
+| Preset | For | What it turns on |
+|---|---|---|
+| `solo` (default) | one person, one agent | nothing — the plain core loop |
+| `fleet` | several agents on one machine | claim racing, WIP backpressure (2 per actor), file-conflict adjudication |
+| `team` | shared review discipline | everything in `fleet`, plus claim ownership and an audit trail |
+
+```console
+$ pool config preset fleet
+Preset switched: fleet (overrides cleared)
+
+$ pool config show
+preset: fleet
+  claim_racing: on
+  ...
+```
+
+`pool config show` prints the full switch list of the current preset. Need one
+tweak? Override a single switch (`pool config set audit_trail on`,
+`pool config unset audit_trail`) — but presets, not switches, are what the
+docs teach. Every advanced mechanism is **off by default**: a pool with no
+configuration behaves exactly like plain `solo` (fail-closed).
+
 ## Machine interface
 
 Add `--json` (before or after the subcommand) for a stable envelope:

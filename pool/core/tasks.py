@@ -136,22 +136,26 @@ def next_task(conn: sqlite3.Connection, *, actor: str, project_id: str | None = 
     """原子认领一件。排序：有效评分 desc → created_at asc → id asc（§5.2）。
 
     project_id 限定单项目池视图；tags 只缩小集合不改变排序。
-    已有在办件（本 actor 名下 claimed）→ TASK_ALREADY_CLAIMED（对应档 WIP 上限）。
+    已有在办件达到本档 WIP 上限（solo=1）→ TASK_ALREADY_CLAIMED。
     """
+    from .config import next_wip_cap
+
     _ensure_pool(conn)
     try:
         conn.execute("BEGIN IMMEDIATE")
-        wip = conn.execute(
-            "SELECT * FROM tasks WHERE status = ? AND claimed_by = ? ORDER BY id LIMIT 1",
+        wip_cap = next_wip_cap(conn)
+        wip_rows = conn.execute(
+            "SELECT id FROM tasks WHERE status = ? AND claimed_by = ? ORDER BY id",
             (TaskStatus.CLAIMED.value, actor),
-        ).fetchone()
-        if wip is not None:
+        ).fetchall()
+        if len(wip_rows) >= wip_cap:
             conn.rollback()
-            t = _row_to_task(wip)
+            oldest = wip_rows[0]["id"]
             raise PoolError(
                 Code.TASK_ALREADY_CLAIMED,
-                f"task #{t.id} is already in progress (run `pool done` first); not claiming twice",
-                {"claimed_task_id": t.id},
+                f"WIP cap reached ({wip_cap}): task #{oldest} is already in progress "
+                f"(run `pool done` first); not claiming more",
+                {"claimed_task_id": oldest, "wip_cap": wip_cap},
             )
 
         sql = "SELECT * FROM tasks WHERE status = ?"
