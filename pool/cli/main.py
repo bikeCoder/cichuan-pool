@@ -81,6 +81,29 @@ def cmd_next(args, data_dir) -> tuple[dict, int]:
         conn.close()
 
 
+def cmd_done(args, data_dir) -> tuple[dict, int]:
+    from ..core.delivery import done_task
+
+    conn = _connect_or_fail(data_dir)
+    try:
+        actor = os.environ.get(ENV_ACTOR, DEFAULT_ACTOR)
+        result = done_task(conn, args.id, args.commit, actor=actor)
+        return result, 0
+    finally:
+        conn.close()
+
+
+def cmd_sync(args, data_dir) -> tuple[dict, int]:
+    from ..core.delivery import sync_pool
+
+    conn = _connect_or_fail(data_dir)
+    try:
+        result = sync_pool(conn, probe_repo=args.repo)
+        return result, 0  # 有待确认不是命令失败（§5.3）
+    finally:
+        conn.close()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pool", description="cichuan-pool — agent-first 任务池")
 
@@ -112,6 +135,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_next.add_argument("--tag", action="append", default=[])
     p_next.set_defaults(fn=cmd_next)
 
+    p_done = sub.add_parser("done", parents=[common], help="登记交付声明，进入待核账")
+    p_done.add_argument("id", type=int)
+    p_done.add_argument("--commit", required=True, help="交付 commit sha（7-40 位十六进制）")
+    p_done.set_defaults(fn=cmd_done)
+
+    p_sync = sub.add_parser("sync", parents=[common], help="核账：strong 自动归档，weak/none 待确认")
+    p_sync.add_argument("--repo", default=".", help="交付仓本地路径（缺省当前目录）")
+    p_sync.set_defaults(fn=cmd_sync)
+
     return parser
 
 
@@ -141,4 +173,14 @@ def main(argv: list[str] | None = None) -> int:
             t = data["task"]
             print(f"认领 #{t['id']}：{t['text']}")
             print(f"理由：{data['reason']}")
+        elif args.command == "done":
+            tag = "（重复声明，幂等）" if data.get("idempotent") else ""
+            print(f"#{data['id']} 已登记交付，待核账{tag}")
+        elif args.command == "sync":
+            for e in data["archived"]:
+                print(f"✓ 归档 #{e['id']}：{e['reason']}")
+            for e in data["unconfirmed"]:
+                print(f"· 待确认 #{e['id']}：{e['reason']}")
+            if not data["archived"] and not data["unconfirmed"]:
+                print("没有待核账的交付声明")
     return 0

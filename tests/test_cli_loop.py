@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 
 import pytest
 
@@ -10,19 +9,6 @@ from pool.cli.main import main as cli_main
 from pool.core import tasks as ops
 from pool.core.errors import Code, PoolError
 from pool.store.paths import ENV_DATA_DIR
-
-
-@pytest.fixture
-def env(monkeypatch, tmp_path):
-    root = tmp_path / "root"
-    root.mkdir()
-    monkeypatch.setenv(ENV_DATA_DIR, str(root))
-    proj = tmp_path / "proj"
-    proj.mkdir()
-    subprocess.run(["git", "init", "-q", str(proj)], check=True)
-    subprocess.run(["git", "-C", str(proj), "remote", "add", "origin",
-                    "https://github.com/me/demo.git"], check=True)
-    return root, proj
 
 
 def _cli(*argv, expect=0):
@@ -175,3 +161,34 @@ def test_json_flag_accepted_in_any_position(env):
     assert r2["ok"] and r2["data"]["id"] == 2
     rc, nxt = _run_json("next", "--json")
     assert nxt["ok"] and nxt["data"]["task"]["id"] == 1
+
+
+def test_done_and_sync_cli_wiring(env, capsys, tmp_path):
+    """CLI 面：done/sync 全链路 + 失败码。"""
+    import json as _json
+    from tests.gitfixture import commit, make_repo
+    root, proj = env
+    assert cli_main(["init"]) == 0
+    assert cli_main(["add", "做件事", "--cwd", str(proj)]) == 0
+    assert cli_main(["next"]) == 0
+    capsys.readouterr()
+    # 非法 sha → 3 档 DELIVERY_SHA_INVALID
+    assert cli_main(["done", "1", "--commit", "ZZZ"]) == 3
+    assert "DELIVERY_SHA_INVALID" in capsys.readouterr().err
+    # 仓不匹配 → sync 待确认不归档，退出 0
+    repo = make_repo(tmp_path / "other", remote_url="https://github.com/other/xyz.git")
+    sha = commit(repo, "work")
+    assert cli_main(["done", "1", "--commit", sha]) == 0
+    capsys.readouterr()
+    assert cli_main(["sync", "--repo", str(repo), "--json"]) == 0
+    out = _json.loads(capsys.readouterr().out.strip())
+    assert out["ok"] and out["data"]["archived"] == []
+    assert out["data"]["unconfirmed"][0]["project_mismatch"] is True
+    # 身份一致的仓 → 归档
+    good = make_repo(tmp_path / "good")
+    sha2 = commit(good, "work2")
+    assert cli_main(["done", "1", "--commit", sha2]) == 0
+    capsys.readouterr()
+    assert cli_main(["sync", "--repo", str(good), "--json"]) == 0
+    out2 = _json.loads(capsys.readouterr().out.strip())
+    assert [e["id"] for e in out2["data"]["archived"]] == [1]
