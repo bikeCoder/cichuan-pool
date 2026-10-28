@@ -70,7 +70,12 @@ def add_task(conn: sqlite3.Connection, text: str, *, project_id: str,
         },
     )
     conn.commit()
-    return get_task(conn, cur.lastrowid)
+    from .events import append_event
+    task = get_task(conn, cur.lastrowid)
+    append_event(conn, task.id, "added", {"project_id": task.project_id,
+                                          "untrusted": bool(task.untrusted)})
+    conn.commit()
+    return task
 
 
 def get_task(conn: sqlite3.Connection, task_id: int) -> Task:
@@ -182,6 +187,9 @@ def next_task(conn: sqlite3.Connection, *, actor: str, project_id: str | None = 
         chosen.status = TaskStatus.CLAIMED
         chosen.claimed_at = ts
         chosen.claimed_by = actor
+        from .events import append_event
+        append_event(conn, chosen.id, "claimed", {"actor": actor, "reason": reason})
+        conn.commit()
         return chosen, reason
     except sqlite3.OperationalError as exc:
         conn.rollback()

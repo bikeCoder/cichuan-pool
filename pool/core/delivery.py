@@ -53,6 +53,8 @@ def done_task(conn: sqlite3.Connection, task_id: int, sha: str, *, actor: str,
         (TaskStatus.DONE_PENDING_MERGE.value, sha.lower(),
          delivery_repo or task.project_id, now_iso(), task_id),
     )
+    from .events import append_event
+    append_event(conn, task_id, "done_pending", {"sha": sha.lower(), "actor": actor})
     conn.commit()
     return {"id": task_id, "status": TaskStatus.DONE_PENDING_MERGE.value, "idempotent": False}
 
@@ -89,6 +91,9 @@ def sync_pool(conn: sqlite3.Connection, *, probe_repo: str,
                 (TaskStatus.DONE.value, now_iso(), task.id,
                  TaskStatus.DONE_PENDING_MERGE.value),
             )
+            from .events import append_event
+            append_event(conn, task.id, "archived",
+                         {"sha": task.delivery_sha, "tier": ev.tier.value})
             archived.append(entry)
         else:
             unconfirmed.append(entry)

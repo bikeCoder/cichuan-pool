@@ -11,7 +11,7 @@ from pathlib import Path
 from ..core.model import PUBLIC_COLUMNS
 from .paths import resolve_db_path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
@@ -37,6 +37,14 @@ def create_schema(conn: sqlite3.Connection) -> None:
           key TEXT PRIMARY KEY,
           value TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS events (
+          id INTEGER PRIMARY KEY,
+          task_id INTEGER NOT NULL,
+          kind TEXT NOT NULL,
+          at TEXT NOT NULL,
+          payload_json TEXT NOT NULL DEFAULT '{{}}'
+        );
+        CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id);
         """
     )
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
