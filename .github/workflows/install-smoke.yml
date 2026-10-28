@@ -52,9 +52,11 @@ jobs:
           ID=$(pool add "Smoke task" --json | python -c "import json,sys;print(json.load(sys.stdin)['data']['id'])")
           CLAIMED=$(pool next --json | python -c "import json,sys;print(json.load(sys.stdin)['data']['task']['id'])")
           test "$ID" = "$CLAIMED"
-          # 重复 next 必须拒绝且 code 稳定
-          pool next --json | python -c "import json,sys;d=json.load(sys.stdin);assert not d['ok'] and d['error']['code']=='TASK_ALREADY_CLAIMED'" || \
-            (pool next --json; exit 1)
+          # 重复 next 必须拒绝且 code 稳定（退出码 3 不许在管道里传播，先落文件再校验）
+          RC=0
+          pool next --json > "$RUNNER_TEMP/next2.json" || RC=$?
+          test "$RC" = "3"
+          python -c "import json;d=json.load(open(r'$RUNNER_TEMP/next2.json'));assert d['error']['code']=='TASK_ALREADY_CLAIMED',d"
           pool done "$ID" --commit "$SHA"
           OUT=$(pool sync --repo "$RUNNER_TEMP/drop" --json)
           echo "$OUT" | python -c "import json,sys;d=json.load(sys.stdin)['data'];assert len(d['archived'])==1 and d['archived'][0]['tier']=='strong',d"
